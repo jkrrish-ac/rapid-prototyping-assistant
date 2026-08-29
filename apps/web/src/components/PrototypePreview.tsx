@@ -1,0 +1,56 @@
+import { useEffect, useState } from 'react';
+import { Download, RefreshCw } from 'lucide-react';
+import { prototypesApi } from '../api/prototypes';
+import type { PrototypeMetadata } from '../types';
+
+export function PrototypePreview({ projectId }: { projectId: string }) {
+  const [meta, setMeta] = useState<PrototypeMetadata | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    prototypesApi
+      .metadata(projectId)
+      .then(setMeta)
+      .catch(() => setMeta(null));
+  }, [projectId, reloadKey]);
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
+        <div className="text-sm text-slate-500">
+          {meta ? (
+            <>
+              <span className="font-medium text-slate-700">{meta.framework === 'react' ? 'React' : 'Vue'}</span>{' '}
+              · v{meta.version} · {meta.fileCount} file{meta.fileCount === 1 ? '' : 's'}
+            </>
+          ) : (
+            'No prototype yet'
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setReloadKey((k) => k + 1)}
+            className="flex items-center gap-1 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
+          >
+            <RefreshCw size={13} /> Refresh
+          </button>
+          <a
+            href={prototypesApi.downloadUrl(projectId)}
+            className="flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary-dark"
+          >
+            <Download size={13} /> Download source
+          </a>
+        </div>
+      </div>
+      <div className="flex-1 bg-slate-100">
+        <iframe
+          key={reloadKey}
+          title="Prototype preview"
+          src={prototypesApi.previewUrl(projectId)}
+          className="h-full w-full border-0"
+          sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
+        />
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,217 @@
+/** Static project-scaffold files wrapped around the AI-generated `src/` files
+ * in every downloaded prototype zip, per PRD Section 9 ("What the downloaded
+ * zip looks like"). Parameterized by project name, framework, and any extra
+ * dependencies the BUILD/FIX stages logged. */
+
+export function packageJson(
+  projectName: string,
+  framework: 'react' | 'vue',
+  extraDependencies: string[],
+): string {
+  const slug = projectName.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'prototype';
+  const extra = Object.fromEntries(extraDependencies.map((d) => [d, 'latest']));
+
+  const base =
+    framework === 'react'
+      ? {
+          name: slug,
+          private: true,
+          version: '0.1.0',
+          type: 'module',
+          scripts: {
+            dev: 'vite',
+            build: 'tsc -b && vite build',
+            preview: 'vite preview',
+          },
+          dependencies: {
+            react: '^18.3.1',
+            'react-dom': '^18.3.1',
+            'react-router-dom': '^6.26.2',
+            'lucide-react': '^0.446.0',
+            ...extra,
+          },
+          devDependencies: {
+            '@types/react': '^18.3.11',
+            '@types/react-dom': '^18.3.0',
+            '@vitejs/plugin-react': '^4.3.2',
+            autoprefixer: '^10.4.20',
+            postcss: '^8.4.47',
+            tailwindcss: '^3.4.13',
+            typescript: '^5.6.3',
+            vite: '^5.4.8',
+          },
+        }
+      : {
+          name: slug,
+          private: true,
+          version: '0.1.0',
+          type: 'module',
+          scripts: {
+            dev: 'vite',
+            build: 'vue-tsc -b && vite build',
+            preview: 'vite preview',
+          },
+          dependencies: {
+            vue: '^3.5.11',
+            'vue-router': '^4.4.5',
+            pinia: '^2.2.4',
+            ...extra,
+          },
+          devDependencies: {
+            '@vitejs/plugin-vue': '^5.1.4',
+            autoprefixer: '^10.4.20',
+            postcss: '^8.4.47',
+            tailwindcss: '^3.4.13',
+            typescript: '^5.6.3',
+            'vue-tsc': '^2.1.6',
+            vite: '^5.4.8',
+          },
+        };
+
+  return JSON.stringify(base, null, 2);
+}
+
+export const TAILWIND_CONFIG = `/** @type {import('tailwindcss').Config} */
+export default {
+  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx,vue}'],
+  theme: {
+    extend: {
+      colors: {
+        primary: { DEFAULT: '#4f46e5', foreground: '#ffffff' },
+        secondary: { DEFAULT: '#0ea5e9', foreground: '#ffffff' },
+        neutral: { DEFAULT: '#64748b', foreground: '#0f172a' },
+        success: { DEFAULT: '#16a34a', foreground: '#ffffff' },
+        warning: { DEFAULT: '#d97706', foreground: '#ffffff' },
+        error: { DEFAULT: '#dc2626', foreground: '#ffffff' },
+      },
+      spacing: {
+        4.5: '1.125rem',
+      },
+    },
+  },
+  plugins: [],
+};
+`;
+
+export const POSTCSS_CONFIG = `export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+};
+`;
+
+export function tsconfigJson(framework: 'react' | 'vue'): string {
+  return JSON.stringify(
+    {
+      compilerOptions: {
+        target: 'ES2020',
+        useDefineForClassFields: true,
+        lib: ['ES2020', 'DOM', 'DOM.Iterable'],
+        module: 'ESNext',
+        skipLibCheck: true,
+        moduleResolution: 'bundler',
+        resolveJsonModule: true,
+        isolatedModules: true,
+        noEmit: true,
+        jsx: framework === 'react' ? 'react-jsx' : undefined,
+        strict: true,
+      },
+      include: ['src'],
+    },
+    null,
+    2,
+  );
+}
+
+export function viteConfig(framework: 'react' | 'vue'): string {
+  if (framework === 'react') {
+    return `import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  server: { host: true, port: 5173 },
+});
+`;
+  }
+  return `import { defineConfig } from 'vite';
+import vue from '@vitejs/plugin-vue';
+
+export default defineConfig({
+  plugins: [vue()],
+  server: { host: true, port: 5173 },
+});
+`;
+}
+
+export function indexHtml(projectName: string, framework: 'react' | 'vue'): string {
+  const entry = framework === 'react' ? '/src/main.tsx' : '/src/main.ts';
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${projectName}</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="${entry}"></script>
+  </body>
+</html>
+`;
+}
+
+export const INDEX_CSS = `@tailwind base;
+@tailwind components;
+@tailwind utilities;
+`;
+
+export function readme(params: {
+  projectName: string;
+  understandSummary: string;
+  chosenApproach: string;
+  framework: string;
+  mocked: string[];
+  knownIssues: string[];
+  nextSteps: string[];
+}): string {
+  return `# ${params.projectName}
+
+${params.understandSummary || 'A frontend-only clickable prototype generated by Rapid Prototype Assistant.'}
+
+## Approach
+
+${params.chosenApproach || '(see DECISIONS.md for the full reasoning)'}
+
+## Tech stack
+
+${params.framework} + Tailwind CSS. Frontend-only — no backend, no database. All data is mocked
+via service functions or \`localStorage\`.
+
+## Running locally
+
+\`\`\`bash
+npm install
+npm run dev
+\`\`\`
+
+## What's mocked
+
+${params.mocked.length ? params.mocked.map((m) => `- ${m}`).join('\n') : '- (see DECISIONS.md, D-BUILD-002)'}
+
+## Known issues / next steps
+
+${
+  params.knownIssues.length
+    ? params.knownIssues.map((i) => `- ${i}`).join('\n')
+    : '- None recorded.'
+}
+
+${params.nextSteps.length ? `\n**Next steps:**\n${params.nextSteps.map((s) => `- ${s}`).join('\n')}` : ''}
+
+---
+The full, append-only decision log for every stage of this project's lifecycle
+is in \`DECISIONS.md\` alongside this file.
+`;
+}
