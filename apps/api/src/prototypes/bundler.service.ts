@@ -33,6 +33,45 @@ const TEXT_LOADERS: Record<string, esbuild.Loader> = {
 export class BundlerService {
   private readonly logger = new Logger(BundlerService.name);
 
+  /**
+   * Per-file syntax validation, independent of bundling. Used right after
+   * BUILD/FIX generate code so a broken file (unbalanced braces, malformed
+   * JSX, invalid JSON) gets caught and looped back to the AI immediately
+   * instead of surfacing only later when the user opens Preview. Framework-
+   * agnostic: validates any .ts/.tsx/.js/.jsx/.json file whether the
+   * prototype is React or Vue (Vue's own .vue SFC files are skipped — esbuild
+   * can't parse SFC syntax without a dedicated plugin this MVP doesn't pull
+   * in, so those still only get caught by the full React bundle/preview).
+   */
+  async validateFiles(
+    files: { path: string; content: string }[],
+  ): Promise<{ ok: boolean; errors: { path: string; message: string }[] }> {
+    const errors: { path: string; message: string }[] = [];
+    for (const f of files) {
+      const ext = f.path.split('.').pop()?.toLowerCase() ?? '';
+      if (ext === 'json') {
+        try {
+          JSON.parse(f.content);
+        } catch (err: any) {
+          errors.push({ path: f.path, message: `Invalid JSON: ${err?.message ?? 'parse error'}` });
+        }
+        continue;
+      }
+      const loader = TEXT_LOADERS[ext];
+      if (!loader) continue; // not a source file we can syntax-check (css, md, .vue SFCs, ...)
+      try {
+        await esbuild.transform(f.content, { loader, jsx: 'automatic' });
+      } catch (err: any) {
+        const detail = err?.errors?.[0];
+        const message = detail
+          ? `${detail.text}${detail.location ? ` (line ${detail.location.line}, col ${detail.location.column})` : ''}`
+          : err?.message ?? 'Syntax error.';
+        errors.push({ path: f.path, message });
+      }
+    }
+    return { ok: errors.length === 0, errors };
+  }
+
   async bundleReact(files: { path: string; content: string }[]): Promise<{
     ok: boolean;
     js?: string;
@@ -136,6 +175,17 @@ ${bundleJs}
       name: 'virtual-fs',
       setup: (build) => {
         build.onResolve({ filter: /.*/ }, (args) => {
+          // The entry point itself (e.g. "src/main.tsx") is a bare-looking
+          // path with no leading "./" or "/" — without this check it falls
+          // through to the "bare specifier" branch below and esbuild refuses
+          // to bundle because "the entry point cannot be marked as external".
+          if (args.kind === 'entry-point') {
+            const normalized = this.normalize(args.path);
+            if (fileMap.has(normalized)) return { path: normalized, namespace: 'virtual' };
+            return {
+              errors: [{ text: `Entry point "${args.path}" not found among the generated files.` }],
+            };
+          }
           if (args.path.startsWith('.') || args.path.startsWith('/')) {
             const fromDir = args.importer ? path.posix.dirname(args.importer) : 'src';
             const resolved = this.resolveVirtual(fromDir, args.path, fileMap);

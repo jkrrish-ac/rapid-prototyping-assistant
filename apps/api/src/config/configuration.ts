@@ -29,5 +29,13 @@ export default () => ({
     apiKey: process.env.ANTHROPIC_API_KEY ?? '',
     modelOpus: process.env.ANTHROPIC_MODEL_OPUS ?? 'claude-opus-4-6',
     modelSonnet: process.env.ANTHROPIC_MODEL_SONNET ?? 'claude-sonnet-4-6',
+    // Optional: forces every stage's max_tokens to this value, overriding
+    // each stage's own budget in stage-definitions.ts. Useful either to
+    // raise every stage at once, or to cap them all down if your account's
+    // model rejects the larger per-stage defaults (BUILD/FIX in particular)
+    // with an "invalid_request_error: max_tokens too large" response.
+    maxTokensOverride: process.env.ANTHROPIC_MAX_TOKENS
+      ? parseInt(process.env.ANTHROPIC_MAX_TOKENS, 10)
+      : undefined,
   },
 });

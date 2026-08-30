@@ -20,14 +20,31 @@ fences — matching exactly this shape:
       "impact": string           // what this affects downstream
     }
   ],
-  "ready_to_advance": boolean    // true once every required output field is populated and the minimum decisions for this stage are logged
+  "ready_to_advance": boolean,   // true once every required output field is populated and the minimum decisions for this stage are logged
+  "choices": [                   // zero or more concrete options the USER can pick with a single click instead of typing a reply
+    {
+      "id": string,               // short stable slug, e.g. "approach-a"
+      "label": string,            // a few words, shown on the button itself
+      "detail": string            // optional: one clause of nuance shown under the label
+    }
+  ]
 }
 
 Never invent decisions you haven't reasoned through, and never pad "decisions"
 just to satisfy a minimum count. Only include a field in "output" once you
 actually have a confident answer for it. If output includes an
 "architectureLocked" or "escalateToOpus" boolean per this stage's
-instructions, set it explicitly (true/false), don't omit it.`;
+instructions, set it explicitly (true/false), don't omit it.
+
+About "choices": this platform is select-first, not type-first. Whenever you
+are about to ask the user an open-ended question, stop and instead do your
+own best analysis using the project context you already have, then turn the
+remaining decision into 2-5 concrete, mutually distinct choices so the user
+can click one rather than write a paragraph. Only fall back to a plain
+open-ended question (with an empty "choices" array) when the answer genuinely
+cannot be reduced to a short list of options (e.g. "what's your product
+called"). Selecting a choice is exactly equivalent to the user typing its
+label as a message — treat it that way in your next turn.`;
 
 @Injectable()
 export class AiService {
@@ -62,6 +79,8 @@ export class AiService {
     stageSystemPrompt: string;
     projectContext: string;
     conversation: AiConversationMessage[];
+    /** The calling stage's own token budget (see StageDefinition.maxOutputTokens). Falls back to 8000. */
+    maxTokens?: number;
   }): Promise<AiStageResponse> {
     if (!this.client) {
       throw new ServiceUnavailableException(
@@ -77,16 +96,28 @@ export class AiService {
     ].join('\n\n');
 
     const modelId = this.modelFor(params.model);
+    const override = this.config.get<number>('anthropic.maxTokensOverride');
+    const maxTokens = override ?? params.maxTokens ?? 8000;
 
     const response = await this.client.messages.create({
       model: modelId,
-      max_tokens: 8000,
+      max_tokens: maxTokens,
       system,
       messages: params.conversation.map((m) => ({ role: m.role, content: m.content })),
     });
 
     const textBlock = response.content.find((b) => b.type === 'text');
     const raw = textBlock && 'text' in textBlock ? textBlock.text : '';
+
+    if (response.stop_reason === 'max_tokens') {
+      this.logger.error(
+        `Stage response hit the ${maxTokens}-token output limit before finishing (raw text length: ${raw.length} chars). Tail: ${raw.slice(-300)}`,
+      );
+      throw new ServiceUnavailableException(
+        `The AI's response was cut off because it hit the ${maxTokens}-token output limit for this stage before finishing — this happens on stages that generate a lot of code or detail (BUILD and FIX especially). Raise this stage's maxOutputTokens in stage-definitions.ts, or set ANTHROPIC_MAX_TOKENS in .env to raise every stage at once, then restart the API and try again. If your account's model instead rejects a higher value with an "max_tokens too large" error, lower ANTHROPIC_MAX_TOKENS to whatever ceiling it reports.`,
+      );
+    }
+
     return this.parseJsonResponse(raw);
   }
 
@@ -99,9 +130,12 @@ export class AiService {
         output: parsed.output ?? {},
         decisions: Array.isArray(parsed.decisions) ? parsed.decisions : [],
         ready_to_advance: Boolean(parsed.ready_to_advance),
+        choices: Array.isArray(parsed.choices) ? parsed.choices : [],
       };
     } catch (err) {
-      this.logger.error(`Failed to parse model JSON response: ${raw.slice(0, 500)}`);
+      this.logger.error(
+        `Failed to parse model JSON response (length ${raw.length}). Head: ${raw.slice(0, 500)} ... Tail: ${raw.slice(-300)}`,
+      );
       throw new ServiceUnavailableException(
         'The AI model returned a response that could not be parsed as JSON. Try again.',
       );

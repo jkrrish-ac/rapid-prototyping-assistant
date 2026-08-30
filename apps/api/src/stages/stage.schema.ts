@@ -17,6 +17,19 @@ class ConversationEntry {
 }
 const ConversationEntrySchema = SchemaFactory.createForClass(ConversationEntry);
 
+@Schema({ _id: false })
+class StageChoice {
+  @Prop({ required: true })
+  id!: string;
+
+  @Prop({ required: true })
+  label!: string;
+
+  @Prop({ type: String, default: null })
+  detail!: string | null;
+}
+const StageChoiceSchema = SchemaFactory.createForClass(StageChoice);
+
 @Schema({ timestamps: true })
 export class StageState {
   _id!: Types.ObjectId;
@@ -38,6 +51,9 @@ export class StageState {
 
   @Prop({ default: false })
   readyToAdvance!: boolean;
+
+  @Prop({ type: [StageChoiceSchema], default: [] })
+  pendingChoices!: StageChoice[];
 
   @Prop({ type: String, enum: ['opus', 'sonnet'], default: null })
   lastModelUsed!: 'opus' | 'sonnet' | null;

@@ -66,6 +66,12 @@ export interface ConversationEntry {
   createdAt: string;
 }
 
+export interface StageChoice {
+  id: string;
+  label: string;
+  detail: string | null;
+}
+
 export interface StageDoc {
   _id: string;
   project: string;
@@ -75,6 +81,7 @@ export interface StageDoc {
   output: Record<string, unknown>;
   readyToAdvance: boolean;
   lastModelUsed: 'opus' | 'sonnet' | null;
+  pendingChoices: StageChoice[];
   startedAt: string | null;
   completedAt: string | null;
 }
