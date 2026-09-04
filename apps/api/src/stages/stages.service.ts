@@ -81,12 +81,30 @@ export class StagesService {
     const docs = await Promise.all(
       STAGE_ORDER.map((s) => this.getOrCreate(projectId, s)),
     );
-    return docs;
+    return Promise.all(docs.map((d) => this.reconcileReadyToAdvance(projectId, d)));
   }
 
   async getStage(projectId: string, userId: string, stage: LifecycleStage) {
     await this.projects.findOwned(projectId, userId);
-    return this.getOrCreate(projectId, stage);
+    const doc = await this.getOrCreate(projectId, stage);
+    return this.reconcileReadyToAdvance(projectId, doc);
+  }
+
+  /**
+   * Self-heals a stage doc whose `readyToAdvance: true` was saved before
+   * isActuallyReadyToAdvance existed (or from any other stale write) — reads
+   * are cheap (only re-checks when the flag is currently true) and correct
+   * the stored value in place so a project stuck showing a doomed "Advance"
+   * button fixes itself on the next page load, no new message required.
+   */
+  private async reconcileReadyToAdvance(projectId: string, doc: StageDocument): Promise<StageDocument> {
+    if (!doc.readyToAdvance) return doc;
+    const actuallyReady = await this.isActuallyReadyToAdvance(projectId, doc.stage, doc.output, true);
+    if (!actuallyReady) {
+      doc.readyToAdvance = false;
+      await doc.save();
+    }
+    return doc;
   }
 
   /** Resolves which model should handle the NEXT turn of this stage. */
@@ -95,6 +113,30 @@ export class StagesService {
     if (def.model !== 'split') return def.model;
     // DESIGN: opus until architecture decisions are locked, then sonnet renders.
     return output.architectureLocked ? 'sonnet' : 'opus';
+  }
+
+  /**
+   * The AI reports its own "ready_to_advance" every turn, but that's a
+   * self-assessment — nothing enforced it actually matched what advance()
+   * checks. DESIGN is the clearest case where this bites: it's a two-phase
+   * stage, and the Opus architecture phase can reasonably think it's "done"
+   * the moment architecture is locked, without realizing the five required
+   * output fields (screens, user_flow, components, data_model, wireframes)
+   * are Phase 2 (Sonnet)'s job and haven't been produced yet — so the
+   * Advance button would show up and then immediately fail. Recompute the
+   * real answer server-side instead of trusting the model's claim outright.
+   */
+  private async isActuallyReadyToAdvance(
+    projectId: string,
+    stage: LifecycleStage,
+    output: Record<string, unknown>,
+    aiSaysReady: boolean,
+  ): Promise<boolean> {
+    if (!aiSaysReady) return false;
+    if (this.outputComplete(stage, output).length > 0) return false;
+    const def = STAGE_DEFINITIONS[stage];
+    const decisionCount = await this.decisions.countForStage(projectId, stage);
+    return decisionCount >= def.minDecisions;
   }
 
   private async buildProjectContext(projectId: string, upToStage: LifecycleStage) {
@@ -196,13 +238,19 @@ export class StagesService {
         doc.output.files = mergeStageFiles(previousFiles, aiResponse.output.files as StageFile[]);
       }
       doc.lastModelUsed = model;
-      doc.readyToAdvance = aiResponse.ready_to_advance;
       doc.pendingChoices = (aiResponse.choices ?? []) as any;
       finalAssistantMessage = aiResponse.assistant_message;
 
       for (const draft of aiResponse.decisions) {
         extraDecisions.push(await this.decisions.append(projectId, stage, model, draft));
       }
+      // After decisions are logged, so minDecisions reflects this turn's own.
+      doc.readyToAdvance = await this.isActuallyReadyToAdvance(
+        projectId,
+        stage,
+        doc.output,
+        aiResponse.ready_to_advance,
+      );
       await doc.save();
     }
 
@@ -270,13 +318,20 @@ export class StagesService {
       doc.output.files = mergeStageFiles(previousFiles, aiResponse.output.files as StageFile[]);
     }
     doc.lastModelUsed = model;
-    doc.readyToAdvance = aiResponse.ready_to_advance;
     doc.pendingChoices = (aiResponse.choices ?? []) as any;
 
     const createdDecisions: DecisionDocument[] = [];
     for (const draft of aiResponse.decisions) {
       createdDecisions.push(await this.decisions.append(projectId, stage, model, draft));
     }
+
+    // After decisions are logged, so minDecisions reflects this turn's own.
+    doc.readyToAdvance = await this.isActuallyReadyToAdvance(
+      projectId,
+      stage,
+      doc.output,
+      aiResponse.ready_to_advance,
+    );
 
     await doc.save();
 
@@ -418,7 +473,7 @@ export class StagesService {
 
     const doc = await this.getOrCreate(projectId, stage);
     doc.output = output;
-    doc.readyToAdvance = this.outputComplete(stage, doc.output).length === 0 && doc.readyToAdvance;
+    doc.readyToAdvance = await this.isActuallyReadyToAdvance(projectId, stage, doc.output, doc.readyToAdvance);
     await doc.save();
 
     if ((stage === LifecycleStage.BUILD || stage === LifecycleStage.FIX) && Array.isArray(doc.output.files)) {

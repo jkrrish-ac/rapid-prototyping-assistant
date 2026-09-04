@@ -4,6 +4,14 @@ import * as path from 'path';
 
 const CDN_IMPORT_MAP: Record<string, string> = {
   react: 'https://esm.sh/react@18.3.1',
+  // esbuild's `jsx: 'automatic'` transform compiles every JSX element into a
+  // call imported from "react/jsx-runtime" (and "react/jsx-dev-runtime" if
+  // jsxDev is ever turned on) instead of the classic React.createElement —
+  // that bare specifier needs its own import-map entry or the browser fails
+  // to resolve it at runtime with no build-time warning, since bundling
+  // itself succeeds fine (the import is left external on purpose).
+  'react/jsx-runtime': 'https://esm.sh/react@18.3.1/jsx-runtime',
+  'react/jsx-dev-runtime': 'https://esm.sh/react@18.3.1/jsx-dev-runtime',
   'react-dom': 'https://esm.sh/react-dom@18.3.1',
   'react-dom/client': 'https://esm.sh/react-dom@18.3.1/client',
   'react-router-dom': 'https://esm.sh/react-router-dom@6.26.2?deps=react@18.3.1,react-dom@18.3.1',
@@ -110,10 +118,10 @@ export class BundlerService {
 
   buildPreviewHtml(bundleJs: string, extraDependencies: string[] = []): string {
     const importMap: Record<string, string> = { ...CDN_IMPORT_MAP };
-    for (const dep of extraDependencies) {
-      if (!importMap[dep]) {
-        importMap[dep] = `https://esm.sh/${dep}?deps=react@18.3.1,react-dom@18.3.1`;
-      }
+    for (const raw of extraDependencies) {
+      const dep = this.extractPackageName(raw);
+      if (!dep || dep.toLowerCase() === 'none' || importMap[dep]) continue;
+      importMap[dep] = `https://esm.sh/${dep}?deps=react@18.3.1,react-dom@18.3.1`;
     }
 
     return `<!doctype html>
@@ -127,11 +135,47 @@ export class BundlerService {
 </head>
 <body>
 <div id="root"></div>
+<script>
+  // A blank preview with no visible error is worse than a build-time
+  // failure — it looks broken with nothing to act on. Surface any runtime
+  // error (including "failed to resolve module specifier" from a bad
+  // import map entry) directly in the page instead of leaving it silent in
+  // a console the user may not think to open.
+  function showRuntimeError(title, detail) {
+    document.body.innerHTML =
+      '<div style="font-family:ui-sans-serif,system-ui,sans-serif;max-width:560px;margin:48px auto;padding:20px;border:1px solid #fecaca;background:#fef2f2;border-radius:12px;color:#991b1b;">' +
+      '<p style="font-weight:600;margin:0 0 6px;">' + title + '</p>' +
+      '<p style="font-size:0.85rem;line-height:1.5;margin:0;white-space:pre-wrap;">' + detail + '</p>' +
+      '</div>';
+  }
+  window.addEventListener('error', function (e) {
+    showRuntimeError('Runtime error in the generated prototype', (e.error && e.error.message) || e.message || 'Unknown error');
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    var reason = e.reason;
+    showRuntimeError('Unhandled error in the generated prototype', (reason && reason.message) || String(reason));
+  });
+</script>
 <script type="module">
 ${bundleJs}
 </script>
 </body>
 </html>`;
+  }
+
+  /**
+   * Dependency entries are documentation-formatted as "<package> — <reason>"
+   * (see stage-definitions.ts's BUILD/FIX prompts) for the README/decision
+   * log, but the LIVE PREVIEW needs the bare importable package name to use
+   * as an import-map key — using the full descriptive string as-is (the bug
+   * this fixes) creates an import-map entry that never matches the actual
+   * `import ... from "date-fns"` specifier in the bundled code, so the
+   * browser fails to resolve the bare specifier at runtime. That failure
+   * happens client-side after a successful build, so it never surfaced as a
+   * backend error — just a blank preview.
+   */
+  private extractPackageName(dep: string): string {
+    return dep.split(/\s+[—-]\s+/)[0].trim();
   }
 
   buildUnsupportedPreviewHtml(reason: string): string {
