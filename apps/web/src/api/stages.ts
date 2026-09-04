@@ -22,4 +22,21 @@ export const stagesApi = {
       method: 'POST',
       url: `/projects/${projectId}/stages/${stage}/advance`,
     }),
+  kickoff: (projectId: string, stage: LifecycleStage) =>
+    api<{
+      stage: StageDoc;
+      assistantMessage: string;
+      decisionsCreated: Decision[];
+      modelUsed: 'opus' | 'sonnet' | null;
+      skipped: boolean;
+    }>({
+      method: 'POST',
+      url: `/projects/${projectId}/stages/${stage}/kickoff`,
+    }),
+  updateOutput: (projectId: string, stage: LifecycleStage, output: Record<string, unknown>) =>
+    api<StageDoc>({
+      method: 'PATCH',
+      url: `/projects/${projectId}/stages/${stage}/output`,
+      data: { output },
+    }),
 };

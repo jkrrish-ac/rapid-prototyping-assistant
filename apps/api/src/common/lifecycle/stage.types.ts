@@ -41,5 +41,14 @@ export interface StageDefinition {
   requiredOutputFields: string[];
   /** Minimum number of decisions that must be logged before this stage can advance. */
   minDecisions: number;
+  /**
+   * Max output tokens for this stage's AI calls. Stages that emit source
+   * code or long structured detail (BUILD, FIX, DESIGN's render phase) need
+   * far more headroom than pure-reasoning stages — the default (8000) is
+   * comfortably enough for a paragraph-sized brief but truncates mid-JSON on
+   * a multi-file prototype, which surfaces as a 503 "could not be parsed as
+   * JSON" error. Overridable globally via ANTHROPIC_MAX_TOKENS in .env.
+   */
+  maxOutputTokens?: number;
   systemPrompt: string;
 }

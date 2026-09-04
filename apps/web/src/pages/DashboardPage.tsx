@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Sparkles, LogOut, X } from 'lucide-react';
+import { Plus, Sparkles, LogOut, Trash2, X } from 'lucide-react';
 import { projectsApi } from '../api/projects';
 import { apiErrorMessage } from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -29,6 +29,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -96,29 +97,44 @@ export default function DashboardPage() {
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {projects.map((p) => (
-              <button
+              <div
                 key={p._id}
-                onClick={() => navigate(`/projects/${p._id}`)}
-                className="flex flex-col rounded-xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                className="group relative flex flex-col rounded-xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
               >
-                <div className="mb-3 flex h-28 items-center justify-center rounded-lg bg-slate-100 text-slate-300">
-                  <Sparkles size={28} />
-                </div>
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <h3 className="truncate font-medium text-slate-900">{p.name}</h3>
-                  <span
-                    className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STAGE_BADGE_COLOR[p.currentStage]}`}
-                  >
-                    {STAGE_LABELS[p.currentStage]}
-                  </span>
-                </div>
-                <p className="line-clamp-2 text-sm text-slate-500">
-                  {p.description || 'No description yet.'}
-                </p>
-                <p className="mt-3 text-xs text-slate-400">
-                  Updated {new Date(p.updatedAt).toLocaleDateString()}
-                </p>
-              </button>
+                <button
+                  type="button"
+                  title="Delete project"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDeleteTarget(p);
+                  }}
+                  className="absolute right-3 top-3 rounded-md p-1.5 text-slate-300 opacity-0 transition hover:bg-error/10 hover:text-error group-hover:opacity-100"
+                >
+                  <Trash2 size={15} />
+                </button>
+                <button
+                  onClick={() => navigate(`/projects/${p._id}`)}
+                  className="flex flex-1 flex-col text-left"
+                >
+                  <div className="mb-3 flex h-28 items-center justify-center rounded-lg bg-slate-100 text-slate-300">
+                    <Sparkles size={28} />
+                  </div>
+                  <div className="mb-2 flex items-center justify-between gap-2 pr-6">
+                    <h3 className="truncate font-medium text-slate-900">{p.name}</h3>
+                    <span
+                      className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STAGE_BADGE_COLOR[p.currentStage]}`}
+                    >
+                      {STAGE_LABELS[p.currentStage]}
+                    </span>
+                  </div>
+                  <p className="line-clamp-2 text-sm text-slate-500">
+                    {p.description || 'No description yet.'}
+                  </p>
+                  <p className="mt-3 text-xs text-slate-400">
+                    Updated {new Date(p.updatedAt).toLocaleDateString()}
+                  </p>
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -127,6 +143,76 @@ export default function DashboardPage() {
       {showCreate && (
         <CreateProjectModal onClose={() => setShowCreate(false)} onCreated={load} />
       )}
+
+      {deleteTarget && (
+        <DeleteProjectModal
+          project={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={load}
+        />
+      )}
+    </div>
+  );
+}
+
+function DeleteProjectModal({
+  project,
+  onClose,
+  onDeleted,
+}: {
+  project: Project;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const onConfirm = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await projectsApi.remove(project._id);
+      onDeleted();
+      onClose();
+    } catch (err) {
+      setError(apiErrorMessage(err));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
+      <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-900">Delete project</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+            <X size={18} />
+          </button>
+        </div>
+        <p className="mb-5 text-sm text-slate-600">
+          Delete <span className="font-medium text-slate-900">{project.name}</span>? It will be
+          removed from your dashboard and this can't be undone from here.
+        </p>
+        {error && <p className="mb-3 text-sm text-error">{error}</p>}
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            className="flex-1 rounded-lg bg-error px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60"
+          >
+            {busy ? 'Deleting…' : 'Delete'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

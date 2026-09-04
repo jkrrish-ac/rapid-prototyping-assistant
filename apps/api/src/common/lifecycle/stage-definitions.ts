@@ -15,6 +15,7 @@ export const STAGE_DEFINITIONS: Record<LifecycleStage, StageDefinition> = {
     decisionPrefix: 'D-IDEA',
     requiredOutputFields: ['idea_statement'],
     minDecisions: 0,
+    maxOutputTokens: 2048,
     systemPrompt: `Purpose: capture the raw idea before any analysis. No judgment, no filtering, no
 clarifying questions yet. Whatever the user describes — a sentence, a ramble, a
 competitor reference — preserve it verbatim as idea_statement. Do not editorialize,
@@ -38,6 +39,7 @@ Set ready_to_advance true as soon as idea_statement is non-empty.`,
       'success_criteria',
     ],
     minDecisions: 3,
+    maxOutputTokens: 8000,
     systemPrompt: `Purpose: decompose the idea into something buildable. Challenge assumptions.
 Identify the user, the problem, and the core value — think like a Product Owner,
 not a note-taker.
@@ -67,6 +69,7 @@ cut and why). Be opinionated — state what you'd cut and why, don't hedge.`,
     decisionPrefix: 'D-IDEATE',
     requiredOutputFields: ['approaches'],
     minDecisions: 1,
+    maxOutputTokens: 8000,
     systemPrompt: `Purpose: generate multiple approaches. Do NOT converge yet. Quantity over quality.
 
 Produce 2–4 approaches that differ meaningfully — different UX models, different
@@ -89,6 +92,7 @@ others). Do not recommend one yet — that's the DECIDE stage's job.`,
     decisionPrefix: 'D-DECIDE',
     requiredOutputFields: ['chosen_approach', 'rationale', 'tech_stack'],
     minDecisions: 2,
+    maxOutputTokens: 8000,
     systemPrompt: `Purpose: pick one approach. Commit. Record why.
 
 Present the approaches from IDEATE side by side with a clear recommendation —
@@ -115,6 +119,9 @@ D-DECIDE-003 only if modifications were made.`,
     decisionPrefix: 'D-DESIGN',
     requiredOutputFields: ['screens', 'user_flow', 'components', 'data_model', 'wireframes'],
     minDecisions: 4,
+    // The Sonnet render phase produces pixel-level wireframe descriptions for
+    // every screen — comfortably the largest reasoning-stage payload.
+    maxOutputTokens: 16000,
     systemPrompt: `Purpose: define the screens, flows, components, and data model before writing
 code. This stage runs in two phases against the SAME conversation:
 
@@ -148,6 +155,9 @@ without further design judgment calls.`,
     decisionPrefix: 'D-BUILD',
     requiredOutputFields: ['files', 'mocked', 'dependencies'],
     minDecisions: 1,
+    // Full source files as escaped JSON strings are token-expensive — this
+    // is the single largest payload in the lifecycle by a wide margin.
+    maxOutputTokens: 32000,
     systemPrompt: `Purpose: write the working prototype code from the DESIGN outputs. Every
 button works. Every flow is navigable. You implement DESIGN's decisions — you
 do not re-evaluate them; if you hit a contradiction or gap, set
@@ -169,9 +179,13 @@ components/pages/services/etc. for the framework chosen (paths like
 MUST include "src/main.tsx" (renders <App /> into the #root element using
 react-dom/client's createRoot — no other bootstrap convention) and "src/App.tsx"
 (top-level routing/composition) — the platform's live preview bundler depends
-on this exact entry convention. Output "mocked": a list of what's simulated.
-Output "dependencies": any extra npm packages beyond the framework's own
-baseline, each with a one-line reason.
+on this exact entry convention. Output "mocked": an array of PLAIN STRINGS describing what's simulated — never
+objects, e.g. ["Task list persists to localStorage, not a server"].
+Output "dependencies": an array of PLAIN STRINGS only — never objects. Format
+each entry as a single string "<package-name> — <one-line reason>" (e.g.
+"date-fns — lightweight date formatting"). If nothing extra was added beyond
+the framework's own baseline, output exactly ["none"] (a one-element array
+containing the string "none"), not an empty array and not an object.
 
 Log D-BUILD-001 (deviations from DESIGN and why), D-BUILD-002 (mock
 boundaries), and D-BUILD-003 only if you added a dependency.`,
@@ -185,6 +199,7 @@ boundaries), and D-BUILD-003 only if you added a dependency.`,
     decisionPrefix: 'D-TEST',
     requiredOutputFields: ['test_checklist', 'issues_found'],
     minDecisions: 1,
+    maxOutputTokens: 8000,
     systemPrompt: `Purpose: verify the prototype and surface UX issues before shipping. Generate
 a checklist against UNDERSTAND's success_criteria and DESIGN's flows, covering:
 flow completeness, state coverage, responsiveness, accessibility, content
@@ -204,6 +219,8 @@ the user accepts shipping with known FAIL items.`,
     decisionPrefix: 'D-FIX',
     requiredOutputFields: ['resolvedIssues', 'deferredIssues', 'files'],
     minDecisions: 1,
+    // Also emits full file contents for whatever changed — same reasoning as BUILD.
+    maxOutputTokens: 24000,
     systemPrompt: `Purpose: resolve TEST's issues by severity. Critical issues MUST be fixed
 before this stage can advance; Major should be; Minor may be deferred with a
 logged reason. This stage loops with TEST until no Critical issues remain.
@@ -213,7 +230,12 @@ Produce updated "files" (only the files that changed, as { path, content }),
 deferred + why that's acceptable for now).
 
 Log one D-FIX-NNN decision per issue actually fixed (what/how/tradeoffs), and
-one D-FIX-DEFER-NNN per deferred issue.`,
+one D-FIX-DEFER-NNN per deferred issue.
+
+If a fix requires a new dependency, also output "dependencies" as an array of
+PLAIN STRINGS in the same "<package-name> — <one-line reason>" format as
+BUILD — never objects. Omit "dependencies"/"mocked" entirely if nothing
+changed on that front; don't restate BUILD's full lists here.`,
   },
 
   [LifecycleStage.SHIP]: {
@@ -224,6 +246,7 @@ one D-FIX-DEFER-NNN per deferred issue.`,
     decisionPrefix: 'D-SHIP',
     requiredOutputFields: ['readmeSummary', 'knownIssues', 'nextSteps'],
     minDecisions: 1,
+    maxOutputTokens: 6000,
     systemPrompt: `Purpose: confirm the prototype is ready to package. Summarize, for the
 README the platform will generate: what the prototype is (from UNDERSTAND),
 which approach was chosen (from DECIDE), how to run it, what's mocked vs. real,
@@ -243,6 +266,7 @@ shipped anyway.`,
     decisionPrefix: 'D-REALUSERS',
     requiredOutputFields: ['observations'],
     minDecisions: 1,
+    maxOutputTokens: 6000,
     systemPrompt: `Purpose: give the user a structured place to log what happened when real
 people used the prototype. You are not running the test yourself — you are
 prompting good capture. Suggest, based on UNDERSTAND's assumptions, what to
@@ -268,6 +292,7 @@ what was learned, from whom (role, not identity), and what it implies.`,
       'prioritizedChanges',
     ],
     minDecisions: 2,
+    maxOutputTokens: 8000,
     systemPrompt: `Purpose: synthesize REAL_USERS observations into actionable insight. Produce:
 patterns (recurring themes), surprises (things users did that weren't
 anticipated), validatedAssumptions and invalidatedAssumptions (referencing
@@ -286,6 +311,7 @@ D-FEEDBACK-002 (priority ranking: what matters most and why).`,
     decisionPrefix: 'D-ITERATE',
     requiredOutputFields: ['changes', 'unchanged', 'new_version_scope'],
     minDecisions: 1,
+    maxOutputTokens: 8000,
     systemPrompt: `Purpose: plan the next version — a delta, not a restart. Produce "changes"
 (array of { change, revisesDecisionId, evidence, expectedImpact }), "unchanged"
 (array of strings — what stays and why, just as important as what changes), and

@@ -74,7 +74,22 @@ stop; add `-v` to also drop the Mongo volume.
   still work; only the "send a message" / "advance" actions need this key).
   `ANTHROPIC_MODEL_OPUS` / `ANTHROPIC_MODEL_SONNET` default to
   `claude-opus-4-6` / `claude-sonnet-4-6` — update them to whatever current
-  model identifiers your Anthropic account has access to.
+  model identifiers your Anthropic account has access to. Use a
+  workspace-scoped API key (create it from inside a specific workspace in
+  the Console, not a personal/identity-linked key) so no extra
+  workspace-ID header is ever needed.
+- **Per-stage output token budgets** — each stage has its own `max_tokens`
+  ceiling in `apps/api/src/common/lifecycle/stage-definitions.ts`
+  (`maxOutputTokens`), because stages that emit source code or long
+  structured detail need far more headroom than pure-reasoning ones: BUILD
+  defaults to 32000, FIX to 24000, DESIGN's pixel-level render phase to
+  16000, and the rest to 6000–8000. If a stage's response keeps getting cut
+  off mid-JSON (a 503 explicitly saying the response "hit the token output
+  limit"), raise that stage's `maxOutputTokens`, or set
+  **`ANTHROPIC_MAX_TOKENS`** in `.env` to override every stage's budget at
+  once and restart the API. If your account's model instead rejects a
+  higher value with an `max_tokens too large` error, set
+  `ANTHROPIC_MAX_TOKENS` to whatever ceiling that error reports.
 - **`JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET`** — change these before any
   real deployment.
 - **Google/GitHub OAuth** — optional. Email/password auth works out of the
